@@ -49,7 +49,7 @@ namespace RSCG_DBContext
 
         var candidates = context.SyntaxProvider.ForAttributeWithMetadataName(
             AttributeFullName,
-            static (node, _) => node is ClassDeclarationSyntax,
+            static (node, _) => node is TypeDeclarationSyntax,
             static (ctx, cancellationToken) => BuildGenerationResult(ctx, cancellationToken));
 
         context.RegisterSourceOutput(candidates, static (ctx, result) =>
@@ -73,18 +73,19 @@ namespace RSCG_DBContext
     private static GenerationResult BuildGenerationResult(GeneratorAttributeSyntaxContext context, CancellationToken cancellationToken)
     {
         var classSymbol = (INamedTypeSymbol)context.TargetSymbol;
-        var classSyntax = (ClassDeclarationSyntax)context.TargetNode;
+        var classSyntax = (TypeDeclarationSyntax)context.TargetNode;
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
         var dbContextSymbol = context.SemanticModel.Compilation.GetTypeByMetadataName("Microsoft.EntityFrameworkCore.DbContext");
         var dbSetSymbol = context.SemanticModel.Compilation.GetTypeByMetadataName("Microsoft.EntityFrameworkCore.DbSet`1");
+        var targetTypeDeclaration = GetTypeDeclaration(classSymbol, cancellationToken);
         if (dbContextSymbol is null || !InheritsFrom(classSymbol, dbContextSymbol))
         {
             diagnostics.Add(Diagnostic.Create(MustInheritDbContext, classSyntax.Identifier.GetLocation(), classSymbol.ToDisplayString()));
             return new GenerationResult(null, diagnostics.ToImmutable());
         }
 
-        if (!classSyntax.Modifiers.Any(SyntaxKind.PartialKeyword))
+        if (!IsPartial(classSymbol, cancellationToken))
         {
             diagnostics.Add(Diagnostic.Create(MustBePartial, classSyntax.Identifier.GetLocation(), classSymbol.ToDisplayString()));
             return new GenerationResult(null, diagnostics.ToImmutable());
@@ -102,8 +103,8 @@ namespace RSCG_DBContext
         return new GenerationResult(
             new GenerationModel(
                 classSymbol.ContainingNamespace.IsGlobalNamespace ? null : classSymbol.ContainingNamespace.ToDisplayString(),
-                GetTypeName(classSymbol),
-                GetContainingTypeNames(classSymbol),
+                CreateTypeShape(classSymbol, targetTypeDeclaration),
+                GetContainingTypes(classSymbol, cancellationToken),
                 dbSetPropertyNames),
             diagnostics.ToImmutable());
     }
@@ -119,13 +120,13 @@ namespace RSCG_DBContext
             builder.AppendLine("{");
         }
 
-        foreach (var containingTypeName in model.ContainingTypeNames)
+        foreach (var containingType in model.ContainingTypes)
         {
-            builder.Append("partial class ").Append(containingTypeName).AppendLine();
+            builder.Append("partial ").Append(containingType.DeclarationKeyword).Append(' ').Append(containingType.Name).AppendLine();
             builder.AppendLine("{");
         }
 
-        builder.Append("partial class ").Append(model.ClassName).AppendLine();
+        builder.Append("partial ").Append(model.TargetType.DeclarationKeyword).Append(' ').Append(model.TargetType.Name).AppendLine();
         builder.AppendLine("{");
 
         foreach (var propertyName in model.DbSetPropertyNames)
@@ -147,7 +148,7 @@ namespace RSCG_DBContext
 
         builder.AppendLine("}");
 
-        for (var index = model.ContainingTypeNames.Length - 1; index >= 0; index--)
+        for (var index = model.ContainingTypes.Length - 1; index >= 0; index--)
         {
             builder.AppendLine("}");
         }
@@ -179,17 +180,53 @@ namespace RSCG_DBContext
                && SymbolEqualityComparer.Default.Equals(namedType.OriginalDefinition, dbSetSymbol);
     }
 
-    private static ImmutableArray<string> GetContainingTypeNames(INamedTypeSymbol classSymbol)
+    private static bool IsPartial(INamedTypeSymbol classSymbol, CancellationToken cancellationToken)
     {
-        var builder = ImmutableArray.CreateBuilder<string>();
+        return classSymbol.DeclaringSyntaxReferences
+            .Select(reference => reference.GetSyntax(cancellationToken))
+            .OfType<TypeDeclarationSyntax>()
+            .Any(static declaration => declaration.Modifiers.Any(SyntaxKind.PartialKeyword));
+    }
+
+    private static ImmutableArray<TypeShapeModel> GetContainingTypes(INamedTypeSymbol classSymbol, CancellationToken cancellationToken)
+    {
+        var builder = ImmutableArray.CreateBuilder<TypeShapeModel>();
 
         for (var containingType = classSymbol.ContainingType; containingType is not null; containingType = containingType.ContainingType)
         {
-            builder.Add(GetTypeName(containingType));
+            builder.Add(CreateTypeShape(containingType, GetTypeDeclaration(containingType, cancellationToken)));
         }
 
         builder.Reverse();
         return builder.ToImmutable();
+    }
+
+    private static TypeDeclarationSyntax GetTypeDeclaration(INamedTypeSymbol symbol, CancellationToken cancellationToken)
+    {
+        return symbol.DeclaringSyntaxReferences
+                   .Select(reference => reference.GetSyntax(cancellationToken))
+                   .OfType<TypeDeclarationSyntax>()
+                   .FirstOrDefault()
+               ?? throw new InvalidOperationException($"Unable to find a declaration for '{symbol.ToDisplayString()}'.");
+    }
+
+    private static TypeShapeModel CreateTypeShape(INamedTypeSymbol symbol, TypeDeclarationSyntax declaration)
+    {
+        return new TypeShapeModel(GetTypeName(symbol), GetDeclarationKeyword(declaration));
+    }
+
+    private static string GetDeclarationKeyword(TypeDeclarationSyntax declaration)
+    {
+        return declaration switch
+        {
+            RecordDeclarationSyntax recordDeclaration when recordDeclaration.ClassOrStructKeyword.IsKind(SyntaxKind.StructKeyword) => "record struct",
+            RecordDeclarationSyntax recordDeclaration when recordDeclaration.ClassOrStructKeyword.IsKind(SyntaxKind.ClassKeyword) => "record class",
+            RecordDeclarationSyntax => "record",
+            ClassDeclarationSyntax => "class",
+            StructDeclarationSyntax => "struct",
+            InterfaceDeclarationSyntax => "interface",
+            _ => "class"
+        };
     }
 
     private static string GetTypeName(INamedTypeSymbol symbol)
@@ -206,28 +243,41 @@ namespace RSCG_DBContext
     {
         public GenerationModel(
             string? namespaceName,
-            string className,
-            ImmutableArray<string> containingTypeNames,
+            TypeShapeModel targetType,
+            ImmutableArray<TypeShapeModel> containingTypes,
             ImmutableArray<string> dbSetPropertyNames)
         {
             NamespaceName = namespaceName;
-            ClassName = className;
-            ContainingTypeNames = containingTypeNames;
+            TargetType = targetType;
+            ContainingTypes = containingTypes;
             DbSetPropertyNames = dbSetPropertyNames;
         }
 
         public string? NamespaceName { get; }
 
-        public string ClassName { get; }
+        public TypeShapeModel TargetType { get; }
 
-        public ImmutableArray<string> ContainingTypeNames { get; }
+        public ImmutableArray<TypeShapeModel> ContainingTypes { get; }
 
         public ImmutableArray<string> DbSetPropertyNames { get; }
 
         public string SourceHintName =>
-            ContainingTypeNames.Length == 0
-                ? ClassName
-                : $"{string.Join(".", ContainingTypeNames)}.{ClassName}";
+            ContainingTypes.Length == 0
+                ? TargetType.Name
+                : $"{string.Join(".", ContainingTypes.Select(static type => type.Name))}.{TargetType.Name}";
+    }
+
+    internal sealed class TypeShapeModel
+    {
+        public TypeShapeModel(string name, string declarationKeyword)
+        {
+            Name = name;
+            DeclarationKeyword = declarationKeyword;
+        }
+
+        public string Name { get; }
+
+        public string DeclarationKeyword { get; }
     }
 
     private sealed class GenerationResult
