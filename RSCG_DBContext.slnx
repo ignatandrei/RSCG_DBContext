@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RSCG_DBContext/RSCG_DBContext.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RSCG_DBContext.Tests/RSCG_DBContext.Tests.csproj" />
+  </Folder>
+</Solution>
