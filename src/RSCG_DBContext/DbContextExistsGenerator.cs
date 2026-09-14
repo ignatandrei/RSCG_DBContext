@@ -65,7 +65,7 @@ namespace RSCG_DBContext
             }
 
             ctx.AddSource(
-                $"{result.Model.ClassName}.DbContextExists.g.cs",
+                $"{result.Model.SourceHintName}.DbContextExists.g.cs",
                 SourceText.From(Render(result.Model), Encoding.UTF8));
         });
     }
@@ -77,6 +77,7 @@ namespace RSCG_DBContext
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
         var dbContextSymbol = context.SemanticModel.Compilation.GetTypeByMetadataName("Microsoft.EntityFrameworkCore.DbContext");
+        var dbSetSymbol = context.SemanticModel.Compilation.GetTypeByMetadataName("Microsoft.EntityFrameworkCore.DbSet`1");
         if (dbContextSymbol is null || !InheritsFrom(classSymbol, dbContextSymbol))
         {
             diagnostics.Add(Diagnostic.Create(MustInheritDbContext, classSyntax.Identifier.GetLocation(), classSymbol.ToDisplayString()));
@@ -93,7 +94,7 @@ namespace RSCG_DBContext
             .GetMembers()
             .OfType<IPropertySymbol>()
             .Where(static property => property.DeclaredAccessibility == Accessibility.Public && !property.IsStatic)
-            .Where(static property => IsDbSet(property.Type))
+            .Where(property => dbSetSymbol is not null && IsDbSet(property.Type, dbSetSymbol))
             .Select(static property => property.Name)
             .OrderBy(static name => name, StringComparer.Ordinal)
             .ToImmutableArray();
@@ -101,7 +102,8 @@ namespace RSCG_DBContext
         return new GenerationResult(
             new GenerationModel(
                 classSymbol.ContainingNamespace.IsGlobalNamespace ? null : classSymbol.ContainingNamespace.ToDisplayString(),
-                classSymbol.Name,
+                GetTypeName(classSymbol),
+                GetContainingTypeNames(classSymbol),
                 dbSetPropertyNames),
             diagnostics.ToImmutable());
     }
@@ -114,6 +116,12 @@ namespace RSCG_DBContext
         if (!string.IsNullOrWhiteSpace(model.NamespaceName))
         {
             builder.Append("namespace ").Append(model.NamespaceName).AppendLine();
+            builder.AppendLine("{");
+        }
+
+        foreach (var containingTypeName in model.ContainingTypeNames)
+        {
+            builder.Append("partial class ").Append(containingTypeName).AppendLine();
             builder.AppendLine("{");
         }
 
@@ -139,6 +147,11 @@ namespace RSCG_DBContext
 
         builder.AppendLine("}");
 
+        for (var index = model.ContainingTypeNames.Length - 1; index >= 0; index--)
+        {
+            builder.AppendLine("}");
+        }
+
         if (!string.IsNullOrWhiteSpace(model.NamespaceName))
         {
             builder.AppendLine("}");
@@ -160,20 +173,46 @@ namespace RSCG_DBContext
         return false;
     }
 
-    private static bool IsDbSet(ITypeSymbol typeSymbol)
+    private static bool IsDbSet(ITypeSymbol typeSymbol, INamedTypeSymbol dbSetSymbol)
     {
         return typeSymbol is INamedTypeSymbol namedType
-               && namedType.Name == "DbSet"
-               && namedType.Arity == 1
-               && namedType.ContainingNamespace.ToDisplayString() == "Microsoft.EntityFrameworkCore";
+               && SymbolEqualityComparer.Default.Equals(namedType.OriginalDefinition, dbSetSymbol);
+    }
+
+    private static ImmutableArray<string> GetContainingTypeNames(INamedTypeSymbol classSymbol)
+    {
+        var builder = ImmutableArray.CreateBuilder<string>();
+
+        for (var containingType = classSymbol.ContainingType; containingType is not null; containingType = containingType.ContainingType)
+        {
+            builder.Add(GetTypeName(containingType));
+        }
+
+        builder.Reverse();
+        return builder.ToImmutable();
+    }
+
+    private static string GetTypeName(INamedTypeSymbol symbol)
+    {
+        if (symbol.TypeParameters.Length == 0)
+        {
+            return symbol.Name;
+        }
+
+        return $"{symbol.Name}<{string.Join(", ", symbol.TypeParameters.Select(static typeParameter => typeParameter.Name))}>";
     }
 
     internal sealed class GenerationModel
     {
-        public GenerationModel(string? namespaceName, string className, ImmutableArray<string> dbSetPropertyNames)
+        public GenerationModel(
+            string? namespaceName,
+            string className,
+            ImmutableArray<string> containingTypeNames,
+            ImmutableArray<string> dbSetPropertyNames)
         {
             NamespaceName = namespaceName;
             ClassName = className;
+            ContainingTypeNames = containingTypeNames;
             DbSetPropertyNames = dbSetPropertyNames;
         }
 
@@ -181,7 +220,14 @@ namespace RSCG_DBContext
 
         public string ClassName { get; }
 
+        public ImmutableArray<string> ContainingTypeNames { get; }
+
         public ImmutableArray<string> DbSetPropertyNames { get; }
+
+        public string SourceHintName =>
+            ContainingTypeNames.Length == 0
+                ? ClassName
+                : $"{string.Join(".", ContainingTypeNames)}.{ClassName}";
     }
 
     private sealed class GenerationResult

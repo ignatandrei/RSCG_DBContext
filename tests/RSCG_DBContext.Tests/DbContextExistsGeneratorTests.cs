@@ -121,15 +121,53 @@ public partial class NotAContext
     }
 
     [Fact]
+    public void Generates_exists_methods_for_nested_dbcontext_classes()
+    {
+        var source = """
+namespace Demo;
+
+using Microsoft.EntityFrameworkCore;
+using RSCG_DBContext;
+
+public partial class Outer
+{
+    [GenerateDbContextExists]
+    public partial class SampleContext : DbContext
+    {
+        public DbSet<Person> People { get; } = null!;
+    }
+}
+
+public sealed class Person
+{
+}
+""";
+
+        var result = RunGenerator(source);
+        var generatedSource = Assert.Single(
+                result.RunResult.Results.Single().GeneratedSources,
+                static generated => generated.HintName == "Outer.SampleContext.DbContextExists.g.cs")
+            .SourceText
+            .ToString();
+
+        Assert.Contains("partial class Outer", generatedSource, StringComparison.Ordinal);
+        Assert.Contains("partial class SampleContext", generatedSource, StringComparison.Ordinal);
+        Assert.Contains("Exists_People", generatedSource, StringComparison.Ordinal);
+        Assert.Empty(result.OutputCompilation.GetDiagnostics().Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
     public void Render_uses_generation_model()
     {
         var source = DbContextExistsGenerator.Render(
             new DbContextExistsGenerator.GenerationModel(
                 "Demo.Namespace",
                 "SampleContext",
+                ["Outer"],
                 ["People"]));
 
         Assert.Contains("namespace Demo.Namespace", source, StringComparison.Ordinal);
+        Assert.Contains("partial class Outer", source, StringComparison.Ordinal);
         Assert.Contains("partial class SampleContext", source, StringComparison.Ordinal);
         Assert.Contains("Exists_People", source, StringComparison.Ordinal);
     }
