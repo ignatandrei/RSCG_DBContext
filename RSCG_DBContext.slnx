@@ -5,4 +5,5 @@
   <Folder Name="/tests/">
     <Project Path="tests/RSCG_DBContext.Tests/RSCG_DBContext.Tests.csproj" />
   </Folder>
+  <Project Path="ExampleProject/ExampleProject.csproj" Id="40b06ecb-5f7c-4be2-b150-c7832a165e4a" />
 </Solution>
