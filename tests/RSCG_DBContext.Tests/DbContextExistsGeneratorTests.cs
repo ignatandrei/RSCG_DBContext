@@ -77,6 +77,42 @@ public sealed class InternalOnly
     }
 
     [Fact]
+    public void Generates_exists_methods_for_inherited_public_dbsets()
+    {
+        var source = """
+namespace Demo;
+
+using Microsoft.EntityFrameworkCore;
+using RSCG_DBContext;
+
+public class BaseContext : DbContext
+{
+    public DbSet<Person> People { get; } = null!;
+}
+
+[GenerateDbContextExists]
+public partial class SampleContext : BaseContext
+{
+}
+
+public sealed class Person
+{
+}
+""";
+
+        var result = RunGenerator(source);
+        var generatedSource = Assert.Single(
+                result.RunResult.Results.Single().GeneratedSources,
+                static generated => generated.HintName == "SampleContext.DbContextExists.g.cs")
+            .SourceText
+            .ToString();
+
+        Assert.Contains("Exists_People", generatedSource, StringComparison.Ordinal);
+        Assert.Contains("Queryable.LongCount(this.People)", generatedSource, StringComparison.Ordinal);
+        Assert.Empty(result.OutputCompilation.GetDiagnostics().Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
     public void Reports_diagnostic_when_dbcontext_is_not_partial()
     {
         var source = """

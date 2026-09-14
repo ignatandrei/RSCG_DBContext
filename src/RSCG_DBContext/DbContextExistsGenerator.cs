@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Immutable;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -91,14 +92,9 @@ namespace RSCG_DBContext
             return new GenerationResult(null, diagnostics.ToImmutable());
         }
 
-        var dbSetPropertyNames = classSymbol
-            .GetMembers()
-            .OfType<IPropertySymbol>()
-            .Where(static property => property.DeclaredAccessibility == Accessibility.Public && !property.IsStatic)
-            .Where(property => dbSetSymbol is not null && IsDbSet(property.Type, dbSetSymbol))
-            .Select(static property => property.Name)
-            .OrderBy(static name => name, StringComparer.Ordinal)
-            .ToImmutableArray();
+        var dbSetPropertyNames = dbSetSymbol is null
+            ? ImmutableArray<string>.Empty
+            : GetDbSetPropertyNames(classSymbol, dbSetSymbol);
 
         return new GenerationResult(
             new GenerationModel(
@@ -178,6 +174,28 @@ namespace RSCG_DBContext
     {
         return typeSymbol is INamedTypeSymbol namedType
                && SymbolEqualityComparer.Default.Equals(namedType.ConstructedFrom, dbSetSymbol);
+    }
+
+    private static ImmutableArray<string> GetDbSetPropertyNames(INamedTypeSymbol classSymbol, INamedTypeSymbol dbSetSymbol)
+    {
+        var propertyNames = new HashSet<string>(StringComparer.Ordinal);
+
+        for (var currentType = classSymbol; currentType is not null; currentType = currentType.BaseType)
+        {
+            foreach (var property in currentType.GetMembers().OfType<IPropertySymbol>())
+            {
+                if (property.DeclaredAccessibility == Accessibility.Public
+                    && !property.IsStatic
+                    && IsDbSet(property.Type, dbSetSymbol))
+                {
+                    propertyNames.Add(property.Name);
+                }
+            }
+        }
+
+        return propertyNames
+            .OrderBy(static propertyName => propertyName, StringComparer.Ordinal)
+            .ToImmutableArray();
     }
 
     private static bool IsPartial(INamedTypeSymbol classSymbol, CancellationToken cancellationToken)
