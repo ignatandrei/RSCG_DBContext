@@ -145,6 +145,15 @@ namespace RSCG_DBContext
             builder.AppendLine("    }");
             builder.AppendLine();
         }
+        builder.Append("    public IEnumerable<string> Problem_DBSets()");
+        builder.AppendLine("    {");
+        foreach (var propertyName in model.DbSetPropertyNames)
+        {
+            builder.AppendLine("        if(!Exists_" + propertyName + "()) yield return \"" + propertyName + "\";");
+        }
+        builder.AppendLine("    }");
+
+
         builder.Append("    public bool Exists_AllDBSets()");
         builder.AppendLine("    {");
         builder.AppendLine("        try");

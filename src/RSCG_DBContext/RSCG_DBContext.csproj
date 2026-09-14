@@ -8,8 +8,46 @@
     <NoWarn>$(NoWarn);RS2008</NoWarn>
   </PropertyGroup>
 
+  <!-- NuGet packaging metadata for the Roslyn source generator -->
+  <PropertyGroup>
+    <PackageId>RSCG_DBContext</PackageId>
+    <Version>2026.914.1850</Version>
+    <Authors>Andrei Ignat</Authors>
+    <Company>AOM</Company>
+    <Description>Roslyn incremental source generator that adds Exists_&lt;DbSetName&gt; and Exists_AllDBSets helper methods to a partial Entity Framework Core DbContext, letting you check table/connection availability without hand-written boilerplate.</Description>
+    <PackageTags>RSCG;RoslynSourceGenerator;SourceGenerator;dotnet;EntityFrameworkCore;EFCore;DbContext;CodeGeneration</PackageTags>
+    <PackageProjectUrl>https://github.com/ignatandrei/RSCG_DBContext</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ignatandrei/RSCG_DBContext</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <!-- This project only produces a compile-time source generator: do not add a lib/ reference assembly -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the generator DLL under analyzers/dotnet/cs so it's loaded as an analyzer, not a regular reference -->
+    <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" Visible="false" />
+    <!-- Shown automatically by Visual Studio in an editor tab right after the package is installed -->
+    <None Include="..\..\readme.txt" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+  <!-- Keep readme.txt (packed above) in sync with README.md before every pack -->
+  <Target Name="GenerateReadmeTxt" BeforeTargets="Pack;GenerateNuspec">
+    <Exec Command="pwsh -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\scripts\Convert-ReadmeToTxt.ps1&quot;"
+          Condition="'$(OS)' != 'Windows_NT'" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\scripts\Convert-ReadmeToTxt.ps1&quot;"
+          Condition="'$(OS)' == 'Windows_NT'" />
+  </Target>
 
 </Project>
