@@ -37,6 +37,8 @@ public partial class EmpContext
 
 ## Installation
 
+NuGet package: [RSCG_DBContext](https://www.nuget.org/packages/RSCG_DBContext/) | [GitHub repository](https://github.com/ignatandrei/RSCG_DBContext/)
+
 Install the NuGet package as an analyzer-only, build-time dependency:
 
 ```powershell

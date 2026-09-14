@@ -1,4 +1,4 @@
-RSCG_DBContext
+﻿RSCG_DBContext
 
 A Roslyn incremental source generator that augments your Entity Framework Core DbContext with Exists_* helper methods, letting you check whether a table/DbSet (or the whole database) is reachable without writing that boilerplate by hand.
 What it generates
@@ -40,8 +40,8 @@ Usage
 
 1. Reference Microsoft.EntityFrameworkCore in your project as usual.
 2. Add the [GenerateDbContextExists] attribute (from the RSCG_DBContext namespace) to your partial DbContext class.
-3. Build the project — the generated Exists_* members become available on your context.
-4. Use Problem_DBSets() to enumerate, by property name, only the DbSets that are currently unreachable — handy for diagnosing which table(s) caused Exists_AllDBSets() to return false.
+3. Build the project â€” the generated Exists_* members become available on your context.
+4. Use Problem_DBSets() to enumerate, by property name, only the DbSets that are currently unreachable â€” handy for diagnosing which table(s) caused Exists_AllDBSets() to return false.
 
 See ExampleProject (ExampleProject) for a full sample and tests/RSCG_DBContext.Tests (tests/RSCG_DBContext.Tests) for generator unit tests.
 Building and packing locally
