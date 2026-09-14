@@ -177,15 +177,18 @@ namespace RSCG_DBContext
     private static bool IsDbSet(ITypeSymbol typeSymbol, INamedTypeSymbol dbSetSymbol)
     {
         return typeSymbol is INamedTypeSymbol namedType
-               && SymbolEqualityComparer.Default.Equals(namedType.OriginalDefinition, dbSetSymbol);
+               && SymbolEqualityComparer.Default.Equals(namedType.ConstructedFrom, dbSetSymbol);
     }
 
     private static bool IsPartial(INamedTypeSymbol classSymbol, CancellationToken cancellationToken)
     {
-        return classSymbol.DeclaringSyntaxReferences
+        var declarations = classSymbol.DeclaringSyntaxReferences
             .Select(reference => reference.GetSyntax(cancellationToken))
             .OfType<TypeDeclarationSyntax>()
-            .Any(static declaration => declaration.Modifiers.Any(SyntaxKind.PartialKeyword));
+            .ToImmutableArray();
+
+        return declarations.Length > 0
+               && declarations.All(static declaration => declaration.Modifiers.Any(SyntaxKind.PartialKeyword));
     }
 
     private static ImmutableArray<TypeShapeModel> GetContainingTypes(INamedTypeSymbol classSymbol, CancellationToken cancellationToken)
@@ -212,7 +215,7 @@ namespace RSCG_DBContext
 
     private static TypeShapeModel CreateTypeShape(INamedTypeSymbol symbol, TypeDeclarationSyntax declaration)
     {
-        return new TypeShapeModel(GetTypeName(symbol), GetDeclarationKeyword(declaration));
+        return new TypeShapeModel(GetTypeName(symbol), GetDeclarationKeyword(declaration), symbol.MetadataName);
     }
 
     private static string GetDeclarationKeyword(TypeDeclarationSyntax declaration)
@@ -263,21 +266,48 @@ namespace RSCG_DBContext
 
         public string SourceHintName =>
             ContainingTypes.Length == 0
-                ? TargetType.Name
-                : $"{string.Join(".", ContainingTypes.Select(static type => type.Name))}.{TargetType.Name}";
+                ? TargetType.HintNameSegment
+                : $"{string.Join(".", ContainingTypes.Select(static type => type.HintNameSegment))}.{TargetType.HintNameSegment}";
     }
 
     internal sealed class TypeShapeModel
     {
-        public TypeShapeModel(string name, string declarationKeyword)
+        public TypeShapeModel(string name, string declarationKeyword, string? hintNameSegment = null)
         {
             Name = name;
             DeclarationKeyword = declarationKeyword;
+            string safeHintNameSegment;
+            if (string.IsNullOrWhiteSpace(hintNameSegment))
+            {
+                safeHintNameSegment = name;
+            }
+            else
+            {
+                safeHintNameSegment = hintNameSegment!;
+            }
+
+            HintNameSegment = SanitizeHintNameSegment(safeHintNameSegment);
         }
 
         public string Name { get; }
 
         public string DeclarationKeyword { get; }
+
+        public string HintNameSegment { get; }
+
+        private static string SanitizeHintNameSegment(string value)
+        {
+            var builder = new StringBuilder(value.Length);
+
+            foreach (var character in value)
+            {
+                builder.Append(char.IsLetterOrDigit(character) || character is '.' or '_' or '-'
+                    ? character
+                    : '_');
+            }
+
+            return builder.ToString();
+        }
     }
 
     private sealed class GenerationResult

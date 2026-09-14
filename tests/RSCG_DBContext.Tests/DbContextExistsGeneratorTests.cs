@@ -102,6 +102,34 @@ public sealed class Person
     }
 
     [Fact]
+    public void Reports_diagnostic_when_any_dbcontext_declaration_is_not_partial()
+    {
+        var source = """
+using Microsoft.EntityFrameworkCore;
+using RSCG_DBContext;
+
+[GenerateDbContextExists]
+public partial class SampleContext : DbContext
+{
+    public DbSet<Person>? People { get; } = null;
+}
+
+public class SampleContext
+{
+}
+
+public sealed class Person
+{
+}
+""";
+
+        var result = RunGenerator(source);
+        var diagnostic = Assert.Single(result.RunResult.Results.Single().Diagnostics);
+
+        Assert.Equal(DbContextExistsGenerator.MustBePartial.Id, diagnostic.Id);
+    }
+
+    [Fact]
     public void Reports_diagnostic_when_attribute_is_used_on_non_dbcontext()
     {
         var source = """
@@ -193,13 +221,46 @@ public sealed class Person
     }
 
     [Fact]
+    public void Generates_exists_methods_for_generic_nested_dbcontexts_with_nullable_dbsets()
+    {
+        var source = """
+#nullable enable
+namespace Demo;
+
+using Microsoft.EntityFrameworkCore;
+using RSCG_DBContext;
+
+public partial class Outer<TOuter>
+{
+    [GenerateDbContextExists]
+    public partial class SampleContext<TItem> : DbContext
+    {
+        public DbSet<TItem>? Items { get; } = null;
+    }
+}
+""";
+
+        var result = RunGenerator(source);
+        var generated = Assert.Single(
+            result.RunResult.Results.Single().GeneratedSources,
+            static item => item.HintName == "Outer_1.SampleContext_1.DbContextExists.g.cs");
+
+        var generatedSource = generated.SourceText.ToString();
+
+        Assert.Contains("partial class Outer<TOuter>", generatedSource, StringComparison.Ordinal);
+        Assert.Contains("partial class SampleContext<TItem>", generatedSource, StringComparison.Ordinal);
+        Assert.Contains("Exists_Items", generatedSource, StringComparison.Ordinal);
+        Assert.Empty(result.OutputCompilation.GetDiagnostics().Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
     public void Render_uses_generation_model()
     {
         var source = DbContextExistsGenerator.Render(
             new DbContextExistsGenerator.GenerationModel(
                 "Demo.Namespace",
-                new DbContextExistsGenerator.TypeShapeModel("SampleContext", "class"),
-                [new DbContextExistsGenerator.TypeShapeModel("Outer", "struct")],
+                new DbContextExistsGenerator.TypeShapeModel("SampleContext<TItem>", "class", "SampleContext_1"),
+                [new DbContextExistsGenerator.TypeShapeModel("Outer<TOuter>", "struct", "Outer_1")],
                 ["People"]));
 
         Assert.Contains("namespace Demo.Namespace", source, StringComparison.Ordinal);
@@ -221,7 +282,9 @@ public sealed class Person
             assemblyName: "GeneratorTests",
             syntaxTrees: syntaxTrees,
             references: GetMetadataReferences(),
-            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            options: new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new DbContextExistsGenerator());
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out _);
